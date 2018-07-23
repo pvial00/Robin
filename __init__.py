@@ -6,28 +6,37 @@ class Robin:
     lb_pool = []
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    def __init__(self, host="0.0.0.0", port=80, listeners=10000, pool={}):
+    def __init__(self, host="0.0.0.0", port=80, listeners=10000, pool=[], health_check=True, health_check_interval=2):
         self.host = host
         self.port = port
         self.listeners = listeners
         self.master_pool = pool
+        self.num_pool_members = len(pool)
+        self.health_check = health_check
+        self.health_check_interval = health_check_interval
+    
+    def loadpool(self):
+        for member in self.master_pool:
+            self.lb_pool.append(member)
 
     def start(self):
+        self.loadpool()
         self.s.bind((self.host, self.port))
         self.s.listen(self.listeners)
+        self.start_health()
         self.server_start()
 
     def start_health(self):
-        self.health_thread = threading.Thread(target=self.health_check).start()
+        if self.health_check == True:
+            self.health_thread = threading.Thread(target=self.health_checker).start()
 
-    def health_check(self):
+    def health_checker(self, getstring="GET /index.html HTTP/1.1\nhost: %s\n\n"):
         while True:
-            if len(offline.keys()) > 0:
-                for member in sorted(offline.keys()):
+            if len(self.offline) > 0:
+                for member in self.offline:
                     respone = ""
-                    server = offline[str(member)]
-                    getstring = "GET /index.html HTTP/1.1\nhost: %s\n\n" % server
-                    sport = 80
+                    server = member[0]
+                    sport = member[1]
                     health_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                     try:
                         health_socket.connect((server, sport))
@@ -40,17 +49,17 @@ class Robin:
                         for line in response.splitlines():
                             if "HTTP/1.1 200 OK" in line:
                                 health_status = 1
-                                self.master_pool[str(member)] = server
-                                del offline[str(member)]
+                                self.lb_pool.append(member)
+                                si = self.offline.index(member)
+                                self.offline.pop(si)
                             else:
-                                health_status = 0
                                 break
-            num_members = len(self.master_pool.keys())
-            for member in sorted(self.master_pool.keys()):
+            num_members = len(self.lb_pool)
+            for member in self.lb_pool:
                 response = ""
-                server = self.master_pool[str(member)]
-                getstring = "GET /index.html HTTP/1.1\nhost: %s\n\n" % server
-                sport = 80
+                server = member[0]
+                #getstring = "GET /index.html HTTP/1.1\nhost: %s\n\n" % server
+                sport = member[1]
                 health_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 try:
                     health_socket.connect((server, sport))
@@ -58,8 +67,9 @@ class Robin:
                     response = health_socket.recv(512)
                 except socket.error as er:
                     health_status = 0
-                    del self.master_pool[str(member)]
-                    self.offline[member] = server
+                    for index, member in enumerate(self.lb_pool):
+                        if server == member[0]:
+                            self.offline.append(self.lb_pool.pop(index))
                 else:
                     line = ""
                     for line in response.splitlines():
@@ -67,21 +77,18 @@ class Robin:
                             health_status = 1
                         else:
                             health_status = 0
-                            del self.master_pool[str(member)]
-                            self.offline[member] = server
+                            for index, member in enumerate(self.lb_pool):
+                                if server == member[0]:
+                                    self.offline.append(self.lb_pool.pop(index))
                         break
-                time.sleep(2)
+                time.sleep(self.health_check_interval)
                 health_socket.close()
 
     def rotatepool(self):
         client = "null"
         nodecount = len(self.lb_pool)
-        master_pool_count = len(self.master_pool)
-        if (nodecount == 0):
-            for member in reversed(sorted(self.master_pool.keys())):
-                self.lb_pool.append(self.master_pool[str(member)])
-        if master_pool_count > 0:
-            client = self.lb_pool.pop()
+        client = self.lb_pool.pop(0)
+        self.lb_pool.append(client)
         return client
 
     def server_start(self):
@@ -92,7 +99,6 @@ class Robin:
     def client_handler(self, c):
         os.setuid(33)
         newpayload = ""
-        cport = 80
         payload = c.recv(1024)
         if len(payload) != 0:
             cnt = 0
@@ -104,40 +110,41 @@ class Robin:
                 else:
                     newpayload = newpayload + "\r\n" + line
         newpayload = newpayload + "\r\n"
-        client = self.rotatepool()
-        if client != "null":
-            client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            try:
-                client_socket.connect((client, cport))
-                client_socket.send(newpayload)
-            except socket.error as csock_err:
-                c.send("Error: 500 No Server available")
-                c.close()
-            else:
-                if len(payload) != 0:
-                    while True:
-                        try:
-                            data_check = select.select([client_socket], [], [], 2)
-                        except IOError as sel_err:
-                             pass
-                        if data_check[0]:
-                            #try:
-                            cpayload = client_socket.recv(8192)
-                            #except socket.error as recv_err:
-                            #    pass
-                        if not cpayload:
-                            break
-                        elif cpayload == "":
-                            break
-
-                        try:
-                            c.send(cpayload)
-                        except socket.error as send_err:
-                            pass
-		
-                    c.close()
-                    client_socket.close()
-        else:
-            srv_unavailable = "HTTP 1.1 503 No Server Available\n"
-            c.send(srv_unavailable)
+        client_entry = self.rotatepool()
+        client = client_entry[0]
+        cport = client_entry[1]
+        client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            client_socket.connect((client, cport))
+            client_socket.send(newpayload)
+        except socket.error as csock_err:
+            c.send("Error: 500 No Server available\n")
             c.close()
+        else:
+            if len(payload) != 0:
+                while True:
+                    try:
+                        data_check = select.select([client_socket], [], [], 2)
+                    except IOError as sel_err:
+                         pass
+                    if data_check[0]:
+                        #try:
+                        cpayload = client_socket.recv(8192)
+                        #except socket.error as recv_err:
+                        #    pass
+                    if not cpayload:
+                        break
+                    elif cpayload == "":
+                        break
+
+                    try:
+                        c.send(cpayload)
+                    except socket.error as send_err:
+                        pass
+		
+                c.close()
+                client_socket.close()
+            else:
+                srv_unavailable = "HTTP 1.1 503 No Server Available\n"
+                c.send(srv_unavailable)
+                c.close()

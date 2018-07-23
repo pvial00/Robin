@@ -87,8 +87,9 @@ class Robin:
     def rotatepool(self):
         client = "null"
         nodecount = len(self.lb_pool)
-        client = self.lb_pool.pop(0)
-        self.lb_pool.append(client)
+        if nodecount >= 1:
+            client = self.lb_pool.pop(0)
+            self.lb_pool.append(client)
         return client
 
     def server_start(self):

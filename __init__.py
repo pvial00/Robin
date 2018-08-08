@@ -9,7 +9,7 @@ class Robin:
     lb_method = 'RR'
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    def __init__(self, host="0.0.0.0", port=80, listeners=10000, pool=[], health_check=True, health_check_interval=2, lb_method='RR'):
+    def __init__(self, host="0.0.0.0", port=80, listeners=10000, pool=[], health_check=True, health_check_interval=2, lb_method='RR', recv_size=8192):
         self.host = host
         self.port = port
         self.listeners = listeners
@@ -18,6 +18,7 @@ class Robin:
         self.health_check = health_check
         self.health_check_interval = health_check_interval
         self.lb_method = lb_method
+        self.recv_size = recv_size
     
     def loadpool(self):
         for member in self.master_pool:
@@ -46,7 +47,7 @@ class Robin:
                     try:
                         health_socket.connect((server, sport))
                         health_socket.send(getstring)
-                        response = health_socket.recv(512)
+                        response = health_socket.recv(self.recv_size)
                     except socket.error as er:
                         health_status = 0
                     else:
@@ -69,7 +70,7 @@ class Robin:
                 try:
                     health_socket.connect((server, sport))
                     health_socket.send(getstring)
-                    response = health_socket.recv(512)
+                    response = health_socket.recv(self.recv_size)
                 except socket.error as er:
                     health_status = 0
                     for index, member in enumerate(self.lb_pool):
@@ -99,10 +100,10 @@ class Robin:
                 return client
         elif self.lb_method == self.methods[1]:
             s = 1000000
-            server = ""
+            server = ("null",0)
             if nodecount >= 1:
                 for member, conns in self.connections.iteritems():
-                    if conns < s:
+                    if conns <= s:
                         s = conns
                         server = member
                     return server
@@ -115,7 +116,7 @@ class Robin:
     def client_handler(self, c):
         os.setuid(33)
         newpayload = ""
-        payload = c.recv(1024)
+        payload = c.recv(self.recv_size)
         if len(payload) != 0:
             cnt = 0
             for line in payload.splitlines():
@@ -130,18 +131,15 @@ class Robin:
         client = member[0]
         cport = member[1]
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        #self.connections[member] = self.connections[member] + 1
         try:
             client_socket.connect((client, cport))
             client_socket.send(newpayload)
         except socket.error as csock_err:
             c.send("Error: 500 No Server available\n")
             c.close()
-            #self.connecions[member] = self.connections[member] - 1
         else:
             if len(payload) != 0:
                 self.connections[member] = self.connections[member] + 1
-                print self.connections
                 while True:
                     try:
                         data_check = select.select([client_socket], [], [], 2)
@@ -149,14 +147,12 @@ class Robin:
                         pass
                     if data_check[0]:
                         #try:
-                        cpayload = client_socket.recv(8192)
+                        cpayload = client_socket.recv(self.recv_size)
                         #except socket.error as recv_err:
                         #    pass
                     if not cpayload:
-                         #self.connections[member] = self.connections[member] - 1
                          break
                     elif cpayload == "":
-                         #self.connections[member] = self.connections[member] - 1
                          break
 
                     try:

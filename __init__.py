@@ -4,9 +4,12 @@ import os, time
 class Robin:
     offline = []
     lb_pool = []
+    connections = {}
+    methods = ['RR','LEAST_CONN']
+    lb_method = 'RR'
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    def __init__(self, host="0.0.0.0", port=80, listeners=10000, pool=[], health_check=True, health_check_interval=2):
+    def __init__(self, host="0.0.0.0", port=80, listeners=10000, pool=[], health_check=True, health_check_interval=2, lb_method='RR'):
         self.host = host
         self.port = port
         self.listeners = listeners
@@ -14,10 +17,12 @@ class Robin:
         self.num_pool_members = len(pool)
         self.health_check = health_check
         self.health_check_interval = health_check_interval
+        self.lb_method = lb_method
     
     def loadpool(self):
         for member in self.master_pool:
             self.lb_pool.append(member)
+            self.connections[member] = 0
 
     def start(self):
         self.loadpool()
@@ -87,10 +92,20 @@ class Robin:
     def rotatepool(self):
         client = "null"
         nodecount = len(self.lb_pool)
-        if nodecount >= 1:
-            client = self.lb_pool.pop(0)
-            self.lb_pool.append(client)
-        return client
+        if self.lb_method == self.methods[0]:
+            if nodecount >= 1:
+                client = self.lb_pool.pop(0)
+                self.lb_pool.append(client)
+                return client
+        elif self.lb_method == self.methods[1]:
+            s = 1000000
+            server = ""
+            if nodecount >= 1:
+                for member, conns in self.connections.iteritems():
+                    if conns < s:
+                        s = conns
+                        server = member
+                    return server
 
     def server_start(self):
         while True:
@@ -111,32 +126,38 @@ class Robin:
                 else:
                     newpayload = newpayload + "\r\n" + line
         newpayload = newpayload + "\r\n"
-        client_entry = self.rotatepool()
-        client = client_entry[0]
-        cport = client_entry[1]
+        member = self.rotatepool()
+        client = member[0]
+        cport = member[1]
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        #self.connections[member] = self.connections[member] + 1
         try:
             client_socket.connect((client, cport))
             client_socket.send(newpayload)
         except socket.error as csock_err:
             c.send("Error: 500 No Server available\n")
             c.close()
+            #self.connecions[member] = self.connections[member] - 1
         else:
             if len(payload) != 0:
+                self.connections[member] = self.connections[member] + 1
+                print self.connections
                 while True:
                     try:
                         data_check = select.select([client_socket], [], [], 2)
-                    except IOError as sel_err:
-                         pass
+                    except select.error as sel_err:
+                        pass
                     if data_check[0]:
                         #try:
                         cpayload = client_socket.recv(8192)
                         #except socket.error as recv_err:
                         #    pass
                     if not cpayload:
-                        break
+                         #self.connections[member] = self.connections[member] - 1
+                         break
                     elif cpayload == "":
-                        break
+                         #self.connections[member] = self.connections[member] - 1
+                         break
 
                     try:
                         c.send(cpayload)
@@ -145,6 +166,7 @@ class Robin:
 		
                 c.close()
                 client_socket.close()
+                self.connections[member] = self.connections[member] - 1
             else:
                 srv_unavailable = "HTTP 1.1 503 No Server Available\n"
                 c.send(srv_unavailable)

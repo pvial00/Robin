@@ -9,7 +9,7 @@ class Robin:
     lb_method = 'RR'
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    def __init__(self, host="0.0.0.0", port=80, listeners=10000, pool=[], health_check=True, health_check_interval=2, lb_method='RR', recv_size=8192):
+    def __init__(self, host="0.0.0.0", port=80, listeners=10000, pool=[], health_check=True, health_check_interval=2, lb_method='RR', recv_size=8192, uid=33):
         self.host = host
         self.port = port
         self.listeners = listeners
@@ -19,6 +19,7 @@ class Robin:
         self.health_check_interval = health_check_interval
         self.lb_method = lb_method
         self.recv_size = recv_size
+        self.uid = uid
     
     def loadpool(self):
         for member in self.master_pool:
@@ -97,6 +98,7 @@ class Robin:
             if nodecount >= 1:
                 client = self.lb_pool.pop(0)
                 self.lb_pool.append(client)
+                self.connections[client] = self.connections[client] + 1
                 return client
         elif self.lb_method == self.methods[1]:
             s = 1000000
@@ -106,7 +108,8 @@ class Robin:
                     if conns <= s:
                         s = conns
                         server = member
-                    return server
+            self.connections[server] = self.connections[server] + 1
+            return server
 
     def server_start(self):
         while True:
@@ -114,7 +117,7 @@ class Robin:
             client_handle = threading.Thread(target=self.client_handler, args=(c,)).start()
 
     def client_handler(self, c):
-        os.setuid(33)
+        os.setuid(self.uid)
         newpayload = ""
         payload = c.recv(self.recv_size)
         if len(payload) != 0:
@@ -139,26 +142,33 @@ class Robin:
             c.close()
         else:
             if len(payload) != 0:
-                self.connections[member] = self.connections[member] + 1
                 while True:
+                    data_check = []
                     try:
                         data_check = select.select([client_socket], [], [], 2)
                     except select.error as sel_err:
                         pass
-                    if data_check[0]:
-                        #try:
-                        cpayload = client_socket.recv(self.recv_size)
-                        #except socket.error as recv_err:
-                        #    pass
-                    if not cpayload:
-                         break
-                    elif cpayload == "":
-                         break
-
                     try:
-                        c.send(cpayload)
-                    except socket.error as send_err:
+                        if data_check[0]:
+                            try:
+                                cpayload = client_socket.recv(self.recv_size)
+                            except socket.error as ser:
+                                print ser
+                            else:
+                                if cpayload:
+                                    try:
+                                        c.send(cpayload)
+                                    except socket.error as send_err:
+                                        pass
+                        #else:
+                        #    break
+                    except IndexError as ier:
                         pass
+                    #if cpayload:
+                    #    try:
+                    ##        c.send(cpayload)
+                    #    except socket.error as send_err:
+                    #        pass
 		
                 c.close()
                 client_socket.close()

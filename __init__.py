@@ -122,21 +122,21 @@ class Robin:
         payload = c.recv(self.recv_size)
         if len(payload) != 0:
             cnt = 0
-            for line in payload.splitlines():
-                if "User-Agent:" in line:
-                    line = "User-Agent: hax0r"
-                if newpayload == "":
-                    newpayload = newpayload + line
-                else:
-                    newpayload = newpayload + "\r\n" + line
-        newpayload = newpayload + "\r\n"
+            #for line in payload.splitlines():
+            #    if "User-Agent:" in line:
+            #        line = "User-Agent: hax0r"
+            #    if newpayload == "":
+            #        newpayload = newpayload + line
+            #    else:
+            #        newpayload = newpayload + "\r\n" + line
+        #newpayload = newpayload + "\r\n"
         member = self.rotatepool()
         client = member[0]
         cport = member[1]
         client_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
             client_socket.connect((client, cport))
-            client_socket.send(newpayload)
+            client_socket.send(payload)
         except socket.error as csock_err:
             c.send("Error: 500 No Server available\n")
             c.close()
@@ -160,15 +160,8 @@ class Robin:
                                         c.send(cpayload)
                                     except socket.error as send_err:
                                         pass
-                        #else:
-                        #    break
                     except IndexError as ier:
                         pass
-                    #if cpayload:
-                    #    try:
-                    ##        c.send(cpayload)
-                    #    except socket.error as send_err:
-                    #        pass
 		
                 c.close()
                 client_socket.close()

@@ -105,7 +105,7 @@ class Robin:
             server = ("null",0)
             if nodecount >= 1:
                 for member, conns in self.connections.iteritems():
-                    if conns <= s:
+                    if conns <= s and member in self.lb_pool:
                         s = conns
                         server = member
             self.connections[server] = self.connections[server] + 1

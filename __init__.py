@@ -120,8 +120,8 @@ class Robin:
         os.setuid(self.uid)
         newpayload = ""
         payload = c.recv(self.recv_size)
-        if len(payload) != 0:
-            cnt = 0
+        #if len(payload) != 0:
+        #    cnt = 0
             #for line in payload.splitlines():
             #    if "User-Agent:" in line:
             #        line = "User-Agent: hax0r"
@@ -160,6 +160,8 @@ class Robin:
                                         c.send(cpayload)
                                     except socket.error as send_err:
                                         pass
+                        else:
+                            break
                     except IndexError as ier:
                         pass
 		
